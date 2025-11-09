@@ -3131,6 +3131,7 @@ GameObject:
   - component: {fileID: 2727992766967470469}
   - component: {fileID: 8472949318901526281}
   - component: {fileID: 5276997959011382137}
+  - component: {fileID: 8472949318901526282}
   m_Layer: 8
   m_Name: PlayerArmature
   m_TagString: Player
@@ -4369,6 +4370,24 @@ MonoBehaviour:
   analogMovement: 0
   cursorLocked: 1
   cursorInputForLook: 1
+  lightAttack: 0
+  heavyAttack: 0
+  blockPressed: 0
+  blockReleased: 0
+--- !u!114 &8472949318901526282
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5276997959011382133}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 441f0e4469e40dc46a6b23bcef5b8524, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  lockDuringAttack: 1
+  randomizeAttacks: 1
 --- !u!1 &8486528341323560179
 GameObject:
   m_ObjectHideFlags: 0

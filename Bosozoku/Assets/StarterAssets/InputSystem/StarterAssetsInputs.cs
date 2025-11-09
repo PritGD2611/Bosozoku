@@ -7,6 +7,7 @@ namespace StarterAssets
 {
 	public class StarterAssetsInputs : MonoBehaviour
 	{
+
 		[Header("Character Input Values")]
 		public Vector2 move;
 		public Vector2 look;
@@ -20,8 +21,14 @@ namespace StarterAssets
 		public bool cursorLocked = true;
 		public bool cursorInputForLook = true;
 
+        public bool lightAttack;
+        public bool heavyAttack;
+        public bool blockPressed;
+        public bool blockReleased;
+
+
 #if ENABLE_INPUT_SYSTEM
-		public void OnMove(InputValue value)
+        public void OnMove(InputValue value)
 		{
 			MoveInput(value.Get<Vector2>());
 		}
@@ -43,10 +50,24 @@ namespace StarterAssets
 		{
 			SprintInput(value.isPressed);
 		}
+        public void OnLightAttack(InputValue value) 
+		{
+			lightAttack = value.isPressed;
+		}
+        public void OnHeavyAttack(InputValue value) 
+		{ 
+			heavyAttack = value.isPressed;
+		}
+        public void OnBlock(InputValue value)
+        {
+            if (value.isPressed) { blockPressed = true; }
+            else { blockReleased = true; }
+        }
+
 #endif
 
 
-		public void MoveInput(Vector2 newMoveDirection)
+        public void MoveInput(Vector2 newMoveDirection)
 		{
 			move = newMoveDirection;
 		} 
