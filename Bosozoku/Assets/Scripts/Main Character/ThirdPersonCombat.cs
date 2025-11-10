@@ -24,13 +24,16 @@ namespace StarterAssets
 
         [Header("Config")]
         [Tooltip("Prevent new attacks until current finishes")]
-        public bool lockDuringAttack = true;
+        public bool lockDuringAttack = false;
 
         [Tooltip("Randomize attacks or cycle them")]
-        public bool randomizeAttacks = true;
+        public bool randomizeAttacks = false;
 
         private int _lastLight = -1;
         private int _lastHeavy = -1;
+
+
+
 
         private void Awake()
         {
@@ -40,6 +43,7 @@ namespace StarterAssets
 
         private void Update()
         {
+
             HandleBlock();
             HandleAttacks();
             // reset one-frame inputs if you set them edge-based; here we read isPressed directly
@@ -47,6 +51,9 @@ namespace StarterAssets
             _input.heavyAttack = false;
             _input.blockPressed = false;
             _input.blockReleased = false;
+            // in your Update() of the combat script on PlayerArmature
+
+
         }
 
         private void HandleBlock()
@@ -69,27 +76,41 @@ namespace StarterAssets
 
         private void HandleAttacks()
         {
+            // If blocking is active, attacks are disabled
             if (_anim.GetBool(IsBlockingHash)) return;
 
+            // If lockDuringAttack is ON and we are currently in an attack, don't allow another
             bool busy = lockDuringAttack && _anim.GetBool(IsAttackingHash);
 
             if (!busy && _input.lightAttack)
             {
+                // Pick one of the 4 light attack animations (Light0-Light3)
                 int idx = PickIndex(4, ref _lastLight);
                 _anim.SetInteger(LightIndexHash, idx);
+
+                // Ensure heavy attack is not accidentally queued
                 _anim.ResetTrigger(HeavyAttackHash);
+
+                // Play light attack animation
                 _anim.SetTrigger(LightAttackHash);
-                _anim.SetBool(IsAttackingHash, true);
             }
             else if (!busy && _input.heavyAttack)
             {
+                // Pick one of the 4 heavy attack animations (Heavy0-Heavy3)
                 int idx = PickIndex(4, ref _lastHeavy);
                 _anim.SetInteger(HeavyIndexHash, idx);
+
+                // Prevent light from mixing in
                 _anim.ResetTrigger(LightAttackHash);
+
+                // Play heavy attack animation
                 _anim.SetTrigger(HeavyAttackHash);
-                _anim.SetBool(IsAttackingHash, true);
             }
         }
+
+
+
+
 
         private int PickIndex(int count, ref int last)
         {
