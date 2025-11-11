@@ -32,6 +32,11 @@ namespace StarterAssets
         private int _lastLight = -1;
         private int _lastHeavy = -1;
 
+        [SerializeField] private SphereCollider[] hitboxes;   // assign PlayerHitCheck here
+        [SerializeField] private PlayerWeaponHitbox[] hitboxDamagers; // assign same objects
+        [SerializeField] private int baseDamage = 25;
+        public int currentDamage = 25;
+
 
 
 
@@ -39,6 +44,16 @@ namespace StarterAssets
         {
             _anim = GetComponent<Animator>();
             _input = GetComponent<StarterAssetsInputs>();
+
+            _anim = GetComponent<Animator>();
+            _input = GetComponent<StarterAssetsInputs>();
+
+            // safety: ensure hitboxes start disabled
+            if (hitboxes != null)
+                foreach (var h in hitboxes) if (h) h.enabled = false;
+
+            if (hitboxDamagers != null)
+                foreach (var d in hitboxDamagers) if (d) d.SetDamage(baseDamage);
         }
 
         private void Update()
@@ -93,6 +108,7 @@ namespace StarterAssets
 
                 // Play light attack animation
                 _anim.SetTrigger(LightAttackHash);
+                foreach (var d in hitboxDamagers) if (d) d.SetDamage(10);
             }
             else if (!busy && _input.heavyAttack)
             {
@@ -105,6 +121,7 @@ namespace StarterAssets
 
                 // Play heavy attack animation
                 _anim.SetTrigger(HeavyAttackHash);
+                foreach (var d in hitboxDamagers) if (d) d.SetDamage(25);
             }
         }
 
@@ -132,8 +149,31 @@ namespace StarterAssets
         // Add these events in each attack clip:
         //   OnAttackStart() near the first frame that should lock movement / enable hitbox
         //   OnAttackEnd()   on the last frame to unlock
-        public void OnAttackStart() { _anim.SetBool(IsAttackingHash, true); }
-        public void OnAttackEnd() { _anim.SetBool(IsAttackingHash, false); }
+        public void OnAttackStart() 
+        { 
+            _anim.SetBool(IsAttackingHash, true);
+            ToggleHitboxes(true);
+        }
+        public void OnAttackEnd() 
+        {
+            ToggleHitboxes(false);
+            _anim.SetBool(IsAttackingHash, false);
+        }
+
+        private void ToggleHitboxes(bool state)
+        {
+            if (hitboxes == null) return;
+            foreach (var h in hitboxes) if (h) h.enabled = state;
+        }
+
+        public void OnWeaponHit(Collider other)
+        {
+            var enemy = other.GetComponentInParent<EnemyAI>();
+            if (enemy != null)
+            {
+                enemy.TakeDamage(currentDamage, other.ClosestPoint(transform.position), Vector3.up);
+            }
+        }
 
         // Damage trigger (call from enemy or test)
         public void PlayHitReact(int hitIndex = -1)
