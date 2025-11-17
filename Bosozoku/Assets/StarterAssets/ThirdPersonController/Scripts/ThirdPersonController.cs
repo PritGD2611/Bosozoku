@@ -98,6 +98,8 @@ namespace StarterAssets
         private int _animIDFreeFall;
         private int _animIDMotionSpeed;
 
+        private int _animIDIsAttacking;
+
 #if ENABLE_INPUT_SYSTEM 
         private PlayerInput _playerInput;
 #endif
@@ -173,6 +175,8 @@ namespace StarterAssets
             _animIDJump = Animator.StringToHash("Jump");
             _animIDFreeFall = Animator.StringToHash("FreeFall");
             _animIDMotionSpeed = Animator.StringToHash("MotionSpeed");
+            _animIDIsAttacking = Animator.StringToHash("IsAttacking");
+
         }
 
         private void GroundedCheck()
@@ -215,6 +219,26 @@ namespace StarterAssets
         {
             // set target speed based on move speed, sprint speed and if sprint is pressed
             float targetSpeed = _input.sprint ? SprintSpeed : MoveSpeed;
+            // after computing targetSpeed:
+            // after computing targetSpeed:
+            bool isAttacking = _hasAnimator && _animator.GetBool(_animIDIsAttacking);
+            if (isAttacking)
+            {
+                // Stop locomotion parameters so blend tree doesn't fight attack
+                _animationBlend = 0f;
+                _animator.SetFloat(_animIDSpeed, 0f);
+                _animator.SetFloat(_animIDMotionSpeed, 0f);
+
+                // Prevent rotation and manual horizontal movement.
+                // But still apply gravity for this frame so player doesn't float or fall incorrectly.
+                Vector3 verticalOnly = new Vector3(0f, _verticalVelocity * Time.deltaTime, 0f);
+                _controller.Move(verticalOnly);
+
+                // Exit so regular movement/rotation code won't run.
+                return;
+            }
+
+
             //prit_ TargetSpeed
             //Debug.Log(MoveSpeed);
             // a simplistic acceleration and deceleration designed to be easy to remove, replace, or iterate upon
