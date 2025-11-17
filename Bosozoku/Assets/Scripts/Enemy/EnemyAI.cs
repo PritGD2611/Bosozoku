@@ -17,8 +17,8 @@ public class EnemyAI : MonoBehaviour
     [Header("Detection & Combat")]
     public float detectRadius = 15f;         // start chasing when player enters this
     public float attackRange = 1.5f;         // must be <= agent.stoppingDistance
-    public float attackCooldown = 1.2f;      // seconds between attacks
-    public int damagePerHit = 15;            // damage dealt to player per hit
+    public float attackCooldown = 2.5f;       // seconds between attacks
+    public int damagePerHit = 5;            // damage dealt to player per hit
     public float windupTime = 0.25f;         // time before enabling hit
     public float hitActiveTime = 0.20f;      // how long the crowbar trigger is active
 
@@ -28,8 +28,21 @@ public class EnemyAI : MonoBehaviour
     public float runChaseThreshold = 7.0f;   // if distance > this ? run, else walk
 
     [Header("Health")]
-    public int maxHealth = 100;
+    public int maxHealth = 50;
     public int currentHealth;
+
+    // --- fields near top (replace your values) ---
+        // initial default (will be randomized each attack)
+                 // enemy now deals 5 per hit
+
+                   // enemy total HP = 50
+    
+
+    // add these for cooldown randomization if you prefer explicit bounds
+    public float minAttackCooldown = 2f;
+    public float maxAttackCooldown = 3f;
+
+
 
     // Animator state names (must match states in controller)
     private static readonly int HashIdle = Animator.StringToHash("Idle");
@@ -145,6 +158,7 @@ public class EnemyAI : MonoBehaviour
     {
         isAttacking = true;
         lastAttackTime = Time.time;
+        attackCooldown = Random.Range(minAttackCooldown, maxAttackCooldown);
 
         agent.isStopped = true;
 

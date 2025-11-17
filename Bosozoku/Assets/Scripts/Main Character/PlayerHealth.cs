@@ -3,63 +3,37 @@ using UnityEngine;
 
 public class PlayerHealth : MonoBehaviour
 {
-    [SerializeField] float hitPoints = 100f;
+    [SerializeField] private float maxHealth = 100f;
     public TextMeshProUGUI healthText;
     public float currentHealth;
 
+    void Start()
+    {
+        currentHealth = maxHealth;
+        UpdateHealthUI();
+    }
 
     public void TakeDamage(float damage)
     {
-
-        currentHealth = (hitPoints -= damage);
+        currentHealth -= damage;
         UpdateHealthUI();
-        if (hitPoints <= 0)
+
+        if (currentHealth <= 0f)
         {
-            GetComponent<DeathHandler>().HandleDeath();
-
-
-
+            // Optional: clamp to 0
+            currentHealth = 0f;
+            GetComponent<DeathHandler>()?.HandleDeath();
         }
-    }
-    // Start is called once before the first execution of Update after the MonoBehaviour is created
-    void Start()
-    {
-        currentHealth = hitPoints;
-        healthText.text = "HP:- " + currentHealth;
-
-
-
-    }
-
-    // Update is called once per frame
-    void Update()
-    {
-
     }
 
     void UpdateHealthUI()
     {
         if (healthText != null)
-        {
-            healthText.text = "HP:- " + (currentHealth);
-        }
+            healthText.text = "HP:- " + Mathf.Max(0, currentHealth).ToString("0");
     }
-
-    /*void UpdateHealthBeginningUI()
-    {
-        if (healthText != null)
-        {
-            healthText.text = "HP:- " + (currentHealth);
-        }
-    }*/
-
-
 
     public float GetCurrentHealth()
     {
         return currentHealth;
     }
-
-
-
 }
