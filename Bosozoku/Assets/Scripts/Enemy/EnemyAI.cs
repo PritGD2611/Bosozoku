@@ -31,18 +31,9 @@ public class EnemyAI : MonoBehaviour
     public int maxHealth = 50;
     public int currentHealth;
 
-    // --- fields near top (replace your values) ---
-        // initial default (will be randomized each attack)
-                 // enemy now deals 5 per hit
-
-                   // enemy total HP = 50
-    
-
     // add these for cooldown randomization if you prefer explicit bounds
     public float minAttackCooldown = 2f;
     public float maxAttackCooldown = 3f;
-
-
 
     // Animator state names (must match states in controller)
     private static readonly int HashIdle = Animator.StringToHash("Idle");
@@ -61,6 +52,7 @@ public class EnemyAI : MonoBehaviour
     {
         agent = GetComponent<NavMeshAgent>();
         anim = GetComponent<Animator>();
+        
 
         if (player == null)
         {
@@ -76,7 +68,8 @@ public class EnemyAI : MonoBehaviour
         // Ensure stopping distance matches attack range
         if (agent != null)
             agent.stoppingDistance = Mathf.Max(agent.stoppingDistance, attackRange);
-    }
+        isDead = false;
+}
 
     void Update()
     {
@@ -219,6 +212,7 @@ public class EnemyAI : MonoBehaviour
     }
 
     // --- Damage system ---
+    // Existing detailed TakeDamage kept for hit-point/normal aware callers:
     public void TakeDamage(int amount, Vector3 hitPoint, Vector3 hitNormal)
     {
         if (isDead) return;
@@ -264,6 +258,28 @@ public class EnemyAI : MonoBehaviour
             var hp = other.GetComponentInParent<PlayerHealth>();
             if (hp) hp.TakeDamage(damagePerHit);
         }
+    }
+
+    // Convenience overloads / entry points so external scripts can damage this enemy easily:
+    // Call any of these from player/hit scripts:
+    //   enemy.GetComponent<EnemyAI>().ApplyDamage(10);
+    //   enemy.SendMessage("ApplyDamage", 10); // SendMessage will also work
+    public void ApplyDamage(int amount)
+    {
+        // simple call with no hit point info
+        TakeDamage(amount, transform.position, Vector3.up);
+    }
+
+    public void TakeDamage(int amount)
+    {
+        // overloaded name for convenience
+        TakeDamage(amount, transform.position, Vector3.up);
+    }
+
+    public void ReceiveDamage(int amount)
+    {
+        // another common name some scripts use
+        TakeDamage(amount, transform.position, Vector3.up);
     }
 
     void OnDrawGizmosSelected()

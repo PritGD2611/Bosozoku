@@ -4,19 +4,19 @@ using UnityEngine;
 public class PlayerHealth : MonoBehaviour
 {
     [SerializeField] private float maxHealth = 100f;
-    public TextMeshProUGUI healthText;
+    //public TextMeshProUGUI healthText;
     public float currentHealth;
 
     void Start()
     {
         currentHealth = maxHealth;
-        UpdateHealthUI();
+        //UpdateHealthUI();
     }
 
     public void TakeDamage(float damage)
     {
         currentHealth -= damage;
-        UpdateHealthUI();
+       // UpdateHealthUI();
 
         if (currentHealth <= 0f)
         {
@@ -26,11 +26,11 @@ public class PlayerHealth : MonoBehaviour
         }
     }
 
-    void UpdateHealthUI()
+   /* void UpdateHealthUI()
     {
         if (healthText != null)
             healthText.text = "HP:- " + Mathf.Max(0, currentHealth).ToString("0");
-    }
+    }*/
 
     public float GetCurrentHealth()
     {
