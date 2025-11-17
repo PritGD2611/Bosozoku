@@ -149,6 +149,17 @@ namespace StarterAssets
         // Add these events in each attack clip:
         //   OnAttackStart() near the first frame that should lock movement / enable hitbox
         //   OnAttackEnd()   on the last frame to unlock
+
+        void OnAnimatorMove()
+        {
+            if (_anim.GetBool(IsAttackingHash))
+            {
+                Vector3 delta = _anim.deltaPosition;
+                delta.y = 0;
+                transform.position += delta;
+            }
+        }
+
         public void OnAttackStart() 
         { 
             _anim.SetBool(IsAttackingHash, true);
