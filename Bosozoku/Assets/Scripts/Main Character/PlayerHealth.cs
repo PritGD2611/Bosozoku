@@ -1,20 +1,65 @@
+using TMPro;
 using UnityEngine;
 
 public class PlayerHealth : MonoBehaviour
 {
-    public int maxHealth = 100;
-    public int currentHealth;
+    [SerializeField] float hitPoints = 100f;
+    public TextMeshProUGUI healthText;
+    public float currentHealth;
 
-    void Awake() => currentHealth = maxHealth;
 
-    public void TakeDamage(int amount)
+    public void TakeDamage(float damage)
     {
-        currentHealth -= amount;
-        if (currentHealth <= 0)
+
+        currentHealth = (hitPoints -= damage);
+        UpdateHealthUI();
+        if (hitPoints <= 0)
         {
-            currentHealth = 0;
-            Debug.Log("Player died.");
-            // Trigger your respawn/death UI here.
+            GetComponent<DeathHandler>().HandleDeath();
+
+
+
         }
     }
+    // Start is called once before the first execution of Update after the MonoBehaviour is created
+    void Start()
+    {
+        currentHealth = hitPoints;
+        healthText.text = "HP:- " + currentHealth;
+
+
+
+    }
+
+    // Update is called once per frame
+    void Update()
+    {
+
+    }
+
+    void UpdateHealthUI()
+    {
+        if (healthText != null)
+        {
+            healthText.text = "HP:- " + (currentHealth);
+        }
+    }
+
+    /*void UpdateHealthBeginningUI()
+    {
+        if (healthText != null)
+        {
+            healthText.text = "HP:- " + (currentHealth);
+        }
+    }*/
+
+
+
+    public float GetCurrentHealth()
+    {
+        return currentHealth;
+    }
+
+
+
 }
