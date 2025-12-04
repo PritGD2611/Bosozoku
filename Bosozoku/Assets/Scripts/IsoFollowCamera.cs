@@ -76,9 +76,33 @@ public class IsoFollowCamera : MonoBehaviour
 
             if (castDist > 0.001f)
             {
-                if (Physics.SphereCast(from, collisionRadius, delta.normalized, out RaycastHit hit, castDist, collisionLayers, QueryTriggerInteraction.Ignore))
+                // Cast for all potential obstructions and choose the nearest valid one
+                RaycastHit[] hits = Physics.SphereCastAll(from, collisionRadius, delta.normalized, castDist, collisionLayers, QueryTriggerInteraction.Ignore);
+                float nearestValid = castDist;
+
+                for (int i = 0; i < hits.Length; i++)
                 {
-                    float safeDist = Mathf.Max(0f, hit.distance - collisionSkin);
+                    var hit = hits[i];
+                    var hcol = hit.collider;
+                    if (hcol == null) continue;
+
+                    // Ignore our target hierarchy
+                    if (target != null && hcol.transform.IsChildOf(target)) continue;
+
+                    // Ignore character colliders by tag to prevent zoom-in when bumping enemies or player
+                    if (hcol.CompareTag("Player") || hcol.CompareTag("Enemy")) continue;
+
+                    // Only consider solid geometry; triggers already filtered by QueryTriggerInteraction.Ignore
+                    // Keep the nearest hit that is not ignored
+                    if (hit.distance < nearestValid)
+                    {
+                        nearestValid = hit.distance;
+                    }
+                }
+
+                if (nearestValid < castDist)
+                {
+                    float safeDist = Mathf.Max(0f, nearestValid - collisionSkin);
                     desiredPos = from + delta.normalized * safeDist;
                 }
             }
