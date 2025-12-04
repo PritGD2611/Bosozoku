@@ -31,28 +31,32 @@ public class EnemyAI : MonoBehaviour
     public int maxHealth = 50;
     public int currentHealth;
 
-    // add these for cooldown randomization if you prefer explicit bounds
     public float minAttackCooldown = 2f;
     public float maxAttackCooldown = 3f;
 
-    // Animator state names (must match states in controller)
+    [Header("Root Motion Control")] 
+    [Tooltip("Use root motion while in Walk animation")]
+    public bool useRootMotionWalk = false; // OFF: let NavMeshAgent drive locomotion
+    [Tooltip("Use root motion while in Run animation")]
+    public bool useRootMotionRun = false;  // OFF: let NavMeshAgent drive locomotion
+    [Tooltip("Use root motion while in Attack animation")]
+    public bool useRootMotionAttack = true; // keep RM for attack lunge/steps
+
     private static readonly int HashIdle = Animator.StringToHash("Idle");
     private static readonly int HashWalk = Animator.StringToHash("Walk");
     private static readonly int HashRun = Animator.StringToHash("Run");
     private static readonly int HashAttack = Animator.StringToHash("Attack");
-    // Optional: add Hurt/Die if you have them
-    // private static readonly int HashHurt = Animator.StringToHash("Hurt");
-    // private static readonly int HashDie  = Animator.StringToHash("Die");
 
     private float lastAttackTime = -999f;
     private bool isDead = false;
     private bool isAttacking = false;
 
+    private bool allowRootMotion = false;
+
     void Awake()
     {
         agent = GetComponent<NavMeshAgent>();
         anim = GetComponent<Animator>();
-        
 
         if (player == null)
         {
@@ -65,19 +69,30 @@ public class EnemyAI : MonoBehaviour
         if (hitTrigger != null)
             hitTrigger.enabled = false;
 
-        // Ensure stopping distance matches attack range
         if (agent != null)
             agent.stoppingDistance = Mathf.Max(agent.stoppingDistance, attackRange);
+
+        if (anim != null)
+            anim.applyRootMotion = false; // default off; we enable only during attack
+
+        if (agent != null)
+        {
+            agent.updatePosition = true;
+            agent.updateRotation = true;
+            agent.autoBraking = true;
+        }
+
         isDead = false;
 }
 
     void Update()
     {
-        if (isDead || player == null) { IdleAnim(); return; }
+        if (isDead || player == null) { IdleAnim(); UpdateRootMotionMode(); return; }
 
-        if (isAttacking) // <- early out, nothing else can stomp Attack
+        if (isAttacking)
         {
             FaceTarget(20f);
+            UpdateRootMotionMode();
             return;
         }
 
@@ -99,11 +114,7 @@ public class EnemyAI : MonoBehaviour
             PatrolIdle();
         }
 
-        // Safety: keep agent base offset sane (prevents floating/foot sinking if model scaled)
-        if (agent && agent.isOnNavMesh && !agent.isStopped && agent.desiredVelocity.sqrMagnitude > 0.01f)
-        {
-            // nothing special needed here, but you can clamp base offset if your rig floats
-        }
+        UpdateRootMotionMode();
     }
 
     private void PatrolIdle()
@@ -121,10 +132,11 @@ public class EnemyAI : MonoBehaviour
         if (agent.isOnNavMesh)
         {
             agent.isStopped = false;
+            agent.updatePosition = true; // ensure agent moves us
+            agent.updateRotation = true; // ensure agent rotates us
             agent.SetDestination(player.position);
         }
 
-        // Choose walk vs run
         if (distanceToPlayer > runChaseThreshold)
         {
             agent.speed = runSpeed;
@@ -142,7 +154,6 @@ public class EnemyAI : MonoBehaviour
         if (isAttacking) return;
         if (Time.time - lastAttackTime < attackCooldown) { IdleAnim(); return; }
 
-        // In range: face player and perform attack
         FaceTarget(20f);
         StartCoroutine(AttackRoutine());
     }
@@ -154,35 +165,30 @@ public class EnemyAI : MonoBehaviour
         attackCooldown = Random.Range(minAttackCooldown, maxAttackCooldown);
 
         agent.isStopped = true;
+        agent.updatePosition = !useRootMotionAttack;
+        agent.updateRotation = !useRootMotionAttack;
 
-        // fire the attack
         anim.CrossFade(HashAttack, 0.05f, 0, 0f);
 
-        // optional: 1 frame to enter the state
         yield return null;
-
-        // WINDUP (use clip time if you want, but keep your constants if they feel good)
         yield return new WaitForSeconds(windupTime);
 
         if (hitTrigger) hitTrigger.enabled = true;
-
         yield return new WaitForSeconds(hitActiveTime);
-
         if (hitTrigger) hitTrigger.enabled = false;
 
-        // Now wait for the clip to actually finish (? normalizedTime >= 0.98)
-        // This prevents “half-played” feel if anything tries to blend out too soon.
         yield return new WaitUntil(() =>
         {
             var s = anim.GetCurrentAnimatorStateInfo(0);
             return s.shortNameHash == HashAttack && s.normalizedTime >= 0.98f && !anim.IsInTransition(0);
         });
 
-        // small recovery so we don’t snap
         yield return new WaitForSeconds(0.1f);
 
         isAttacking = false;
         agent.isStopped = false;
+        agent.updatePosition = true;  // return control to agent for locomotion
+        agent.updateRotation = true;
     }
 
     private void FaceTarget(float turnSpeed)
@@ -194,21 +200,59 @@ public class EnemyAI : MonoBehaviour
         transform.rotation = Quaternion.RotateTowards(transform.rotation, look, turnSpeed * Time.deltaTime * 100f);
     }
 
-    // --- Animation helpers (no transitions in the controller needed) ---
     private void IdleAnim() => CrossFadeIfNeeded(HashIdle, 0.1f);
     private void WalkAnim() => CrossFadeIfNeeded(HashWalk, 0.08f);
     private void RunAnim() => CrossFadeIfNeeded(HashRun, 0.08f);
 
     private void CrossFadeIfNeeded(int stateHash, float fade)
     {
-        // do NOT stomp while transitioning
         if (anim.IsInTransition(0)) return;
-
         var info = anim.GetCurrentAnimatorStateInfo(0);
         if (info.shortNameHash == stateHash) return;
-
-        // start from normalizedTime 0 to avoid “half-play”
         anim.CrossFade(stateHash, fade, 0, 0f);
+    }
+
+    private void UpdateRootMotionMode()
+    {
+        if (anim == null) return;
+
+        var info = anim.GetCurrentAnimatorStateInfo(0);
+        int current = info.shortNameHash;
+
+        bool inAttack = current == HashAttack || isAttacking;
+
+        bool shouldUseRM = useRootMotionAttack && inAttack;
+
+        allowRootMotion = shouldUseRM;
+        anim.applyRootMotion = shouldUseRM;
+
+        // For non-attack, keep animator speed at 1 so foot timing is consistent while agent moves us
+        if (!shouldUseRM) anim.speed = 1f;
+
+        if (agent)
+        {
+            agent.updatePosition = !shouldUseRM ? true : false; // agent drives position unless attacking with RM
+            agent.updateRotation = !shouldUseRM ? true : false;
+            if (shouldUseRM)
+            {
+                agent.nextPosition = transform.position;
+            }
+        }
+    }
+
+    private void OnAnimatorMove()
+    {
+        if (!allowRootMotion || anim == null) return;
+
+        Vector3 delta = anim.deltaPosition;
+        delta.y = 0f;
+        transform.position += delta;
+        transform.rotation *= anim.deltaRotation;
+
+        if (agent)
+        {
+            agent.nextPosition = transform.position;
+        }
     }
 
     // --- Damage system ---
@@ -222,9 +266,6 @@ public class EnemyAI : MonoBehaviour
             Die();
             return;
         }
-
-        // Optional: flinch
-        // anim.CrossFade(HashHurt, 0.05f);
     }
 
     private void Die()
@@ -232,11 +273,8 @@ public class EnemyAI : MonoBehaviour
         isDead = true;
         agent.isStopped = true;
         agent.ResetPath();
-        // Optional: anim.CrossFade(HashDie, 0.1f);
-        // If you don’t have a die clip, just idle/freeze and disable colliders:
         IdleAnim();
         DisableAllCollisions();
-        // Destroy after a delay if you want
         Destroy(gameObject, 5f);
     }
 
