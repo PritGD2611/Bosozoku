@@ -32,11 +32,11 @@ public class PlayerCombat : MonoBehaviour
     // called by HitCheckDamage
     public void OnWeaponHit(Collider other)
     {
-        var enemy = other.GetComponentInParent<EnemyAI>();
-        if (enemy)
+        //var enemy = other.GetComponentInParent<EnemyAI>();
+        /*if (enemy)
         {
             int dmg = isHeavy ? heavyDamage : lightDamage;
             enemy.ApplyDamage(dmg);
-        }
+        }*/
     }
 }

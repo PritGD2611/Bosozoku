@@ -1,330 +1,360 @@
 using UnityEngine;
 using UnityEngine.AI;
-using System.Collections;
 
-[RequireComponent(typeof(NavMeshAgent))]
-[RequireComponent(typeof(Animator))]
-public class EnemyAI : MonoBehaviour
+// Compact melee Enemy AI with a script-driven FSM (no Animator transitions required)
+// States: Idle -> Chase -> Attack -> Hurt -> Dead
+// Uses safe CrossFade calls and robust attack gating with animation-event hooks and a fallback timeout.
+public class EnemyAi : MonoBehaviour
 {
     [Header("References")]
-    public Transform player;                 // drag your player here or leave empty to auto-find by tag "Player"
-    public Transform hitCheck;               // the child on the crowbar tip/hand
-    public SphereCollider hitTrigger;        // trigger collider on hitCheck (disabled by default)
+    public Transform playerTransform;                 // auto-found in Awake if null
+    public NavMeshAgent agent;                        // optional: if null, transform-based movement
+    public Animator animator;                         // required for animations
+    public WeaponHitbox weaponHitbox;                 // weapon trigger script
 
-    private NavMeshAgent agent;
-    private Animator anim;
+    [Header("Tuning")]
+    public float chaseDistance = 12f;
+    public float attackDistance = 2f;
+    public float moveSpeed = 3f;                      // legacy fallback
+    public float walkSpeed = 2.0f;                    // new: walk speed
+    public float runSpeed = 4.5f;                     // new: run speed
+    public float attackCooldown = 1.2f;
+    public float maxAttackDuration = 2f;             // fallback if OnAttackEnd not called
+    public int attackDamage = 15;
+    public bool useRootMotion = false;                // if true, rely on animator root motion
+    public float runThreshold = 6f;                   // if distance to player > this, use run anim/speed
 
-    [Header("Detection & Combat")]
-    public float detectRadius = 15f;         // start chasing when player enters this
-    public float attackRange = 1.5f;         // must be <= agent.stoppingDistance
-    public float attackCooldown = 2.5f;       // seconds between attacks
-    public int damagePerHit = 5;            // damage dealt to player per hit
-    public float windupTime = 0.25f;         // time before enabling hit
-    public float hitActiveTime = 0.20f;      // how long the crowbar trigger is active
+    [Header("Animator States (exact names)")]
+    public string idleState = "Idle";
+    public string walkState = "Walk";                // walk locomotion
+    public string runState = "Run";                  // run locomotion
+    public string attackState = "Attack";            // ideally not looped
+    public string hurtState = "Hurt";
+    public string deathState = "Die";
 
-    [Header("Movement Speeds")]
-    public float walkSpeed = 2.0f;
-    public float runSpeed = 3.8f;
-    public float runChaseThreshold = 7.0f;   // if distance > this ? run, else walk
+    [Header("Debug")]
+    public bool debug = true;
 
-    [Header("Health")]
-    public int maxHealth = 50;
-    public int currentHealth;
+    private enum State { Idle, Chase, Attack, Hurt, Dead }
+    private State currentState = State.Idle;
 
-    public float minAttackCooldown = 2f;
-    public float maxAttackCooldown = 3f;
+    private Health health;
+    private string currentAnim = string.Empty;        // cache last played animation name
 
-    [Header("Root Motion Control")] 
-    [Tooltip("Use root motion while in Walk animation")]
-    public bool useRootMotionWalk = false; // OFF: let NavMeshAgent drive locomotion
-    [Tooltip("Use root motion while in Run animation")]
-    public bool useRootMotionRun = false;  // OFF: let NavMeshAgent drive locomotion
-    [Tooltip("Use root motion while in Attack animation")]
-    public bool useRootMotionAttack = true; // keep RM for attack lunge/steps
-
-    private static readonly int HashIdle = Animator.StringToHash("Idle");
-    private static readonly int HashWalk = Animator.StringToHash("Walk");
-    private static readonly int HashRun = Animator.StringToHash("Run");
-    private static readonly int HashAttack = Animator.StringToHash("Attack");
-
-    private float lastAttackTime = -999f;
-    private bool isDead = false;
     private bool isAttacking = false;
+    private float attackStartTime = -999f;
+    private float nextAttackTime = 0f;               // cooldown gate set on attack end
 
-    private bool allowRootMotion = false;
+    // Optional init for spawned enemies
+    public void Init(Transform player)
+    {
+        playerTransform = player;
+    }
 
     void Awake()
     {
-        agent = GetComponent<NavMeshAgent>();
-        anim = GetComponent<Animator>();
-
-        if (player == null)
+        if (playerTransform == null)
         {
-            var p = GameObject.FindGameObjectWithTag("Player");
-            if (p) player = p.transform;
+            var p = GameObject.FindWithTag("Player");
+            if (p) playerTransform = p.transform;
+            if (playerTransform == null && debug)
+                Debug.LogWarning("[EnemyAI] Player not found by tag. Assign playerTransform in inspector.", this);
         }
 
-        currentHealth = maxHealth;
+        if (animator == null) animator = GetComponent<Animator>();
+        if (agent == null) agent = GetComponent<NavMeshAgent>();
+        health = GetComponent<Health>();
 
-        if (hitTrigger != null)
-            hitTrigger.enabled = false;
-
-        if (agent != null)
-            agent.stoppingDistance = Mathf.Max(agent.stoppingDistance, attackRange);
-
-        if (anim != null)
-            anim.applyRootMotion = false; // default off; we enable only during attack
-
-        if (agent != null)
+        if (weaponHitbox != null)
         {
-            agent.updatePosition = true;
-            agent.updateRotation = true;
-            agent.autoBraking = true;
+            weaponHitbox.damage = attackDamage;
+            if (weaponHitbox.owner == null) weaponHitbox.owner = gameObject;
+            weaponHitbox.Deactivate(); // ensure off by default
         }
 
-        isDead = false;
-}
+        if (animator != null) animator.applyRootMotion = useRootMotion;
+
+        ChangeState(State.Idle);
+    }
+
+    void OnEnable()
+    {
+        // Subscribe to health events
+        if (health != null)
+        {
+            health.onHurt.AddListener(OnHurtEvent);
+            health.onDead.AddListener(OnDeadEvent);
+        }
+    }
+
+    void OnDisable()
+    {
+        if (health != null)
+        {
+            health.onHurt.RemoveListener(OnHurtEvent);
+            health.onDead.RemoveListener(OnDeadEvent);
+        }
+    }
 
     void Update()
     {
-        if (isDead || player == null) { IdleAnim(); UpdateRootMotionMode(); return; }
-
-        if (isAttacking)
+        if (currentState == State.Dead) return;
+        if (playerTransform == null)
         {
-            FaceTarget(20f);
-            UpdateRootMotionMode();
+            // stay idle until player is known
+            ChangeState(State.Idle);
             return;
         }
 
-        float dist = Vector3.Distance(transform.position, player.position);
+        float dist = Vector3.Distance(transform.position, playerTransform.position);
 
-        if (dist < 4f) FaceTarget(10f);
+        // Always face the player in all active states
+        FacePlayer(720f);
 
-        if (dist <= attackRange)
+        // Attack fallback protection: if attack never ended (missing event or looped clip)
+        if (isAttacking && (Time.time - attackStartTime) > maxAttackDuration)
         {
-            agent.ResetPath();
-            TryAttack();
+            if (debug) Debug.Log("[EnemyAI] Attack timeout. Auto-ending attack.", this);
+            OnAttackEnd();
         }
-        else if (dist <= detectRadius)
+
+        switch (currentState)
         {
-            Chase(dist);
+            case State.Idle:
+                // enter chase if within chase distance
+                if (dist <= chaseDistance)
+                {
+                    ChangeState(State.Chase);
+                }
+                else
+                {
+                    PlayAnimSafe(idleState);
+                    ApplyAgentSpeed(0f);
+                }
+                break;
+
+            case State.Chase:
+                // can start attack only if cooldown ready and within range
+                if (!isAttacking && Time.time >= nextAttackTime && dist <= attackDistance)
+                {
+                    StartAttack();
+                }
+                else
+                {
+                    DoMovement(dist);
+                    // Choose walk or run animation and speed based on distance
+                    if (!string.IsNullOrEmpty(runState) && dist > runThreshold)
+                    {
+                        PlayAnimSafe(runState);
+                        ApplyAgentSpeed(runSpeed);
+                    }
+                    else
+                    {
+                        PlayAnimSafe(walkState);
+                        ApplyAgentSpeed(walkSpeed);
+                    }
+
+                    // fall back to idle if player is far
+                    if (dist > chaseDistance * 1.2f)
+                    {
+                        ChangeState(State.Idle);
+                    }
+                }
+                break;
+
+            case State.Attack:
+                // lock movement while attacking
+                // wait for events; fallback handled above
+                PlayAnimSafe(attackState);
+                ApplyAgentSpeed(0f);
+                break;
+
+            case State.Hurt:
+                // After hurt, decide next state quickly
+                PlayAnimSafe(hurtState);
+                if (!isAttacking && Time.time >= nextAttackTime && dist <= attackDistance)
+                {
+                    StartAttack();
+                }
+                else if (dist <= chaseDistance)
+                {
+                    ChangeState(State.Chase);
+                }
+                else
+                {
+                    ChangeState(State.Idle);
+                }
+                break;
+        }
+    }
+
+    // Change state via single entry point
+    private void ChangeState(State newState)
+    {
+        if (currentState == newState) return;
+        currentState = newState;
+        if (debug) Debug.Log($"[EnemyAI] State -> {currentState}", this);
+
+        switch (newState)
+        {
+            case State.Idle:
+                PlayAnimSafe(idleState);
+                if (agent != null) { agent.isStopped = false; agent.updateRotation = true; }
+                break;
+
+            case State.Chase:
+                if (agent != null) { agent.isStopped = false; agent.updateRotation = true; }
+                // animation and speed picked in Update based on distance (walk vs run)
+                break;
+
+            case State.Attack:
+                isAttacking = true;
+                attackStartTime = Time.time; // will be updated in OnAttackStart
+                if (agent != null)
+                {
+                    agent.isStopped = true; // stop movement
+                    agent.updateRotation = true; // allow agent rotation if needed
+                }
+                PlayAnimSafe(attackState);
+                break;
+
+            case State.Hurt:
+                PlayAnimSafe(hurtState);
+                break;
+
+            case State.Dead:
+                PlayAnimSafe(deathState);
+                HandleDeath();
+                break;
+        }
+    }
+
+    // Safe animation trigger: avoids repeated CrossFade into same state each frame
+    private void PlayAnimSafe(string stateName)
+    {
+        if (animator == null || string.IsNullOrEmpty(stateName)) return;
+        if (currentAnim == stateName) return;
+        animator.CrossFade(stateName, 0.08f, 0, 0f);
+        currentAnim = stateName;
+    }
+
+    private void DoMovement(float dist)
+    {
+        if (useRootMotion) return; // let Animator drive via root motion
+        if (playerTransform == null) return;
+
+        float desiredSpeed = (dist > runThreshold) ? runSpeed : walkSpeed;
+
+        if (agent != null && agent.isOnNavMesh)
+        {
+            agent.updatePosition = true;
+            agent.updateRotation = true;
+            agent.speed = desiredSpeed;
+            agent.stoppingDistance = Mathf.Max(0.05f, attackDistance * 0.6f);
+            agent.SetDestination(playerTransform.position);
         }
         else
         {
-            PatrolIdle();
-        }
-
-        UpdateRootMotionMode();
-    }
-
-    private void PatrolIdle()
-    {
-        if (isAttacking) return;
-        agent.isStopped = true;
-        agent.ResetPath();
-        IdleAnim();
-    }
-
-    private void Chase(float distanceToPlayer)
-    {
-        if (isAttacking) return;
-
-        if (agent.isOnNavMesh)
-        {
-            agent.isStopped = false;
-            agent.updatePosition = true; // ensure agent moves us
-            agent.updateRotation = true; // ensure agent rotates us
-            agent.SetDestination(player.position);
-        }
-
-        if (distanceToPlayer > runChaseThreshold)
-        {
-            agent.speed = runSpeed;
-            RunAnim();
-        }
-        else
-        {
-            agent.speed = walkSpeed;
-            WalkAnim();
-        }
-    }
-
-    private void TryAttack()
-    {
-        if (isAttacking) return;
-        if (Time.time - lastAttackTime < attackCooldown) { IdleAnim(); return; }
-
-        FaceTarget(20f);
-        StartCoroutine(AttackRoutine());
-    }
-
-    private IEnumerator AttackRoutine()
-    {
-        isAttacking = true;
-        lastAttackTime = Time.time;
-        attackCooldown = Random.Range(minAttackCooldown, maxAttackCooldown);
-
-        agent.isStopped = true;
-        agent.updatePosition = !useRootMotionAttack;
-        agent.updateRotation = !useRootMotionAttack;
-
-        anim.CrossFade(HashAttack, 0.05f, 0, 0f);
-
-        yield return null;
-        yield return new WaitForSeconds(windupTime);
-
-        if (hitTrigger) hitTrigger.enabled = true;
-        yield return new WaitForSeconds(hitActiveTime);
-        if (hitTrigger) hitTrigger.enabled = false;
-
-        yield return new WaitUntil(() =>
-        {
-            var s = anim.GetCurrentAnimatorStateInfo(0);
-            return s.shortNameHash == HashAttack && s.normalizedTime >= 0.98f && !anim.IsInTransition(0);
-        });
-
-        yield return new WaitForSeconds(0.1f);
-
-        isAttacking = false;
-        agent.isStopped = false;
-        agent.updatePosition = true;  // return control to agent for locomotion
-        agent.updateRotation = true;
-    }
-
-    private void FaceTarget(float turnSpeed)
-    {
-        Vector3 dir = (player.position - transform.position);
-        dir.y = 0f;
-        if (dir.sqrMagnitude < 0.0001f) return;
-        Quaternion look = Quaternion.LookRotation(dir);
-        transform.rotation = Quaternion.RotateTowards(transform.rotation, look, turnSpeed * Time.deltaTime * 100f);
-    }
-
-    private void IdleAnim() => CrossFadeIfNeeded(HashIdle, 0.1f);
-    private void WalkAnim() => CrossFadeIfNeeded(HashWalk, 0.08f);
-    private void RunAnim() => CrossFadeIfNeeded(HashRun, 0.08f);
-
-    private void CrossFadeIfNeeded(int stateHash, float fade)
-    {
-        if (anim.IsInTransition(0)) return;
-        var info = anim.GetCurrentAnimatorStateInfo(0);
-        if (info.shortNameHash == stateHash) return;
-        anim.CrossFade(stateHash, fade, 0, 0f);
-    }
-
-    private void UpdateRootMotionMode()
-    {
-        if (anim == null) return;
-
-        var info = anim.GetCurrentAnimatorStateInfo(0);
-        int current = info.shortNameHash;
-
-        bool inAttack = current == HashAttack || isAttacking;
-
-        bool shouldUseRM = useRootMotionAttack && inAttack;
-
-        allowRootMotion = shouldUseRM;
-        anim.applyRootMotion = shouldUseRM;
-
-        // For non-attack, keep animator speed at 1 so foot timing is consistent while agent moves us
-        if (!shouldUseRM) anim.speed = 1f;
-
-        if (agent)
-        {
-            agent.updatePosition = !shouldUseRM ? true : false; // agent drives position unless attacking with RM
-            agent.updateRotation = !shouldUseRM ? true : false;
-            if (shouldUseRM)
+            Vector3 targetPos = playerTransform.position;
+            Vector3 dir = targetPos - transform.position;
+            dir.y = 0f;
+            if (dir.sqrMagnitude > 0.0001f)
             {
-                agent.nextPosition = transform.position;
+                Vector3 step = Vector3.MoveTowards(transform.position, targetPos, desiredSpeed * Time.deltaTime);
+                transform.position = step;
+                // face handled globally in Update (FacePlayer)
             }
         }
     }
 
-    private void OnAnimatorMove()
+    private void ApplyAgentSpeed(float s)
     {
-        if (!allowRootMotion || anim == null) return;
-
-        Vector3 delta = anim.deltaPosition;
-        delta.y = 0f;
-        transform.position += delta;
-        transform.rotation *= anim.deltaRotation;
-
-        if (agent)
+        if (agent != null)
         {
-            agent.nextPosition = transform.position;
+            agent.speed = s > 0f ? s : 0f;
         }
     }
 
-    // --- Damage system ---
-    // Existing detailed TakeDamage kept for hit-point/normal aware callers:
-    public void TakeDamage(int amount, Vector3 hitPoint, Vector3 hitNormal)
+    private void FacePlayer(float turnSpeedDegPerSec)
     {
-        if (isDead) return;
-        currentHealth -= amount;
-        if (currentHealth <= 0)
+        if (playerTransform == null) return;
+        Vector3 dir = playerTransform.position - transform.position;
+        dir.y = 0f;
+        if (dir.sqrMagnitude < 0.0001f) return;
+        Quaternion look = Quaternion.LookRotation(dir);
+        transform.rotation = Quaternion.RotateTowards(transform.rotation, look, turnSpeedDegPerSec * Time.deltaTime);
+    }
+
+    // Attack gating: called when conditions satisfied
+    private void StartAttack()
+    {
+        if (isAttacking) return;
+        if (Time.time < nextAttackTime) return;
+        ChangeState(State.Attack);
+        if (debug) Debug.Log("[EnemyAI] StartAttack()", this);
+    }
+
+    // Animation event: called at the attack hit start frame
+    public void OnAttackStart()
+    {
+        isAttacking = true;
+        attackStartTime = Time.time;
+        if (weaponHitbox != null)
         {
-            Die();
-            return;
+            weaponHitbox.damage = attackDamage;
+            weaponHitbox.Activate();
         }
+        if (debug) Debug.Log("[EnemyAI] OnAttackStart", this);
     }
 
-    private void Die()
+    // Animation event: called at the attack hit end frame
+    public void OnAttackEnd()
     {
-        isDead = true;
-        agent.isStopped = true;
-        agent.ResetPath();
-        IdleAnim();
-        DisableAllCollisions();
-        Destroy(gameObject, 5f);
-    }
-
-    private void DisableAllCollisions()
-    {
-        foreach (var c in GetComponentsInChildren<Collider>())
-            c.enabled = false;
-    }
-
-    // Attack trigger ? apply damage when overlapping the player
-    private void OnTriggerEnter(Collider other)
-    {
-        // Only consider our attack trigger
-        if (hitTrigger == null || other == null) return;
-        if (!hitTrigger.enabled) return; // only during strike window
-
-        if (other.CompareTag("Player"))
+        if (weaponHitbox != null)
         {
-            var hp = other.GetComponentInParent<PlayerHealth>();
-            if (hp) hp.TakeDamage(damagePerHit);
+            weaponHitbox.Deactivate();
         }
+        isAttacking = false;
+        nextAttackTime = Time.time + attackCooldown; // start cooldown now
+        // return to chase if still alive
+        if (currentState != State.Dead)
+        {
+            ChangeState(State.Chase);
+        }
+        if (debug) Debug.Log("[EnemyAI] OnAttackEnd", this);
     }
 
-    // Convenience overloads / entry points so external scripts can damage this enemy easily:
-    // Call any of these from player/hit scripts:
-    //   enemy.GetComponent<EnemyAI>().ApplyDamage(10);
-    //   enemy.SendMessage("ApplyDamage", 10); // SendMessage will also work
-    public void ApplyDamage(int amount)
+    private void OnHurtEvent()
     {
-        // simple call with no hit point info
-        TakeDamage(amount, transform.position, Vector3.up);
+        if (currentState == State.Dead) return;
+        ChangeState(State.Hurt);
     }
 
-    public void TakeDamage(int amount)
+    private void OnDeadEvent()
     {
-        // overloaded name for convenience
-        TakeDamage(amount, transform.position, Vector3.up);
+        if (currentState == State.Dead) return;
+        ChangeState(State.Dead);
     }
 
-    public void ReceiveDamage(int amount)
+    private void HandleDeath()
     {
-        // another common name some scripts use
-        TakeDamage(amount, transform.position, Vector3.up);
-    }
+        // Deactivate weapon
+        if (weaponHitbox != null) weaponHitbox.Deactivate();
 
-    void OnDrawGizmosSelected()
-    {
-        Gizmos.color = Color.yellow;
-        Gizmos.DrawWireSphere(transform.position, detectRadius);
-        Gizmos.color = Color.red;
-        Gizmos.DrawWireSphere(transform.position, attackRange);
+        // Stop movement
+        if (agent != null)
+        {
+            agent.isStopped = true;
+            agent.ResetPath();
+            agent.updatePosition = false;
+            agent.updateRotation = false;
+            agent.enabled = false;
+        }
+
+        // Disable colliders
+        foreach (var c in GetComponentsInChildren<Collider>()) c.enabled = false;
+
+        // Disable this AI component
+        enabled = false;
     }
 }

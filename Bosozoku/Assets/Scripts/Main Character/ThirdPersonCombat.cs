@@ -33,7 +33,7 @@ namespace StarterAssets
         private int _lastHeavy = -1;
 
         [SerializeField] private SphereCollider[] hitboxes;   // assign PlayerHitCheck here
-        [SerializeField] private PlayerWeaponHitbox[] hitboxDamagers; // assign same objects
+        //[SerializeField] private PlayerWeaponHitbox[] hitboxDamagers; // assign same objects
         [SerializeField] private int baseDamage = 25;
         public int currentDamage = 25;
 
@@ -52,8 +52,8 @@ namespace StarterAssets
             if (hitboxes != null)
                 foreach (var h in hitboxes) if (h) h.enabled = false;
 
-            if (hitboxDamagers != null)
-                foreach (var d in hitboxDamagers) if (d) d.SetDamage(baseDamage);
+           /* if (hitboxDamagers != null)
+                foreach (var d in hitboxDamagers) if (d) d.SetDamage(baseDamage);*/
         }
 
         private void Update()
@@ -108,7 +108,7 @@ namespace StarterAssets
 
                 // Play light attack animation
                 _anim.SetTrigger(LightAttackHash);
-                foreach (var d in hitboxDamagers) if (d) d.SetDamage(10);
+               // foreach (var d in hitboxDamagers) if (d) d.SetDamage(10);
             }
             else if (!busy && _input.heavyAttack)
             {
@@ -121,7 +121,7 @@ namespace StarterAssets
 
                 // Play heavy attack animation
                 _anim.SetTrigger(HeavyAttackHash);
-                foreach (var d in hitboxDamagers) if (d) d.SetDamage(25);
+                //foreach (var d in hitboxDamagers) if (d) d.SetDamage(25);
             }
         }
 
@@ -179,11 +179,11 @@ namespace StarterAssets
 
         public void OnWeaponHit(Collider other)
         {
-            var enemy = other.GetComponentInParent<EnemyAI>();
+           /* var enemy = other.GetComponentInParent<EnemyAI>();
             if (enemy != null)
             {
                 enemy.TakeDamage(currentDamage, other.ClosestPoint(transform.position), Vector3.up);
-            }
+            }*/
         }
 
         // Damage trigger (call from enemy or test)
